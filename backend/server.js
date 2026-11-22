@@ -31,39 +31,18 @@ app.get('/auth/start', (req, res) => {
 
 // 2. Strava sends the runner back; we swap the code for tokens and store them in MongoDB.
 app.get('/auth/callback', async (req, res) => {
-  const { code, state, error } = req.query;
-  if (!ALLOWED_RETURN.test(String(state || ''))) return res.status(400).send('Invalid state');
-  const back = (q) => res.redirect(`${state}${state.includes('?') ? '&' : '?'}${new URLSearchParams(q)}`);
-  if (error || !code) return back({ error: error || 'no_code' });
-  try {
-    const r = await fetch('https://www.strava.com/oauth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: STRAVA_CLIENT_ID, client_secret: STRAVA_CLIENT_SECRET, code, grant_type: 'authorization_code' }),
-    });
-    const t = await r.json();
-    if (!t.athlete) return back({ error: 'token_exchange_failed' });
-    const sessionToken = crypto.randomBytes(24).toString('hex'); // the app's own key; Strava tokens never leave the server
-    await users.updateOne(
-      { _id: t.athlete.id },
-      {
-        $set: {
-          name: t.athlete.firstname || 'Runner',
-          access_token: t.access_token,
-          refresh_token: t.refresh_token,
-          expires_at: t.expires_at,
-          sessionToken,
-          updatedAt: new Date(),
-        },
-        $setOnInsert: { createdAt: new Date() },
-      },
-      { upsert: true }
-    );
-    back({ athleteId: t.athlete.id, name: t.athlete.firstname || 'Runner', token: sessionToken });
-  } catch (e) {
-    console.error(e);
-    back({ error: 'server_error' });
-  }
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const back = (q) => {
+    const url = `${state}${state.includes('?') ? '&' : '?'}${new URLSearchParams(q)}`;
+    const failed = !!q.error;
+    res.send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>RunRewards</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:48px 24px;color:#12263A">
+<h2>${failed ? 'Connection failed' : 'Strava connected'}</h2>
+<p>${failed ? 'Tap below and try again from the app.' : 'Tap the button to return to RunRewards.'}</p>
+<p><a href="${esc(url)}" style="display:inline-block;background:#E4005B;color:#fff;padding:16px 28px;border-radius:10px;text-decoration:none;font-weight:bold">Open RunRewards</a></p>
+<script>window.location.href=${JSON.stringify(url).replace(/</g, '\\u003c')};</script>
+</body></html>`);
+  };
 });
 
 // Looks up the runner from the app's session token.
